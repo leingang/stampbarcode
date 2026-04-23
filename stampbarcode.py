@@ -5,10 +5,14 @@ from __future__ import annotations
 import argparse
 import io
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Sequence
+
+BARCODE_BAR_WIDTH = 0.6
+BARCODE_BAR_HEIGHT = 18
+BARCODE_MARGIN = 18
 
 
-def generate_codes(start: int, num: int) -> Iterable[int]:
+def generate_codes(start: int, num: int) -> range:
     return range(start + 1, start + num + 1)
 
 
@@ -29,11 +33,16 @@ def create_overlay(page_width: float, page_height: float, code: int, page_number
 
     packet = io.BytesIO()
     pdf_canvas = canvas.Canvas(packet, pagesize=(page_width, page_height))
-    barcode = code39.Standard39(str(code), barWidth=0.6, barHeight=18, stop=1, humanReadable=True)
+    barcode = code39.Standard39(
+        str(code),
+        barWidth=BARCODE_BAR_WIDTH,
+        barHeight=BARCODE_BAR_HEIGHT,
+        stop=1,
+        humanReadable=True,
+    )
 
-    margin = 18
-    x = barcode_x_position(page_width, barcode.width, margin, page_number)
-    y = max((page_height - barcode.height) / 2.0, margin)
+    x = barcode_x_position(page_width, barcode.width, BARCODE_MARGIN, page_number)
+    y = max((page_height - barcode.height) / 2.0, BARCODE_MARGIN)
     barcode.drawOn(pdf_canvas, x, y)
 
     pdf_canvas.save()
@@ -62,12 +71,17 @@ def stamp_pdf(input_pdf: Path, output_pdf: Path, code: int) -> None:
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="stampbarcode")
     parser.add_argument("pdf_file", type=Path, help="Source PDF file")
-    parser.add_argument("--start", type=int, default=0, help="Starting barcode number")
+    parser.add_argument(
+        "--start",
+        type=int,
+        default=0,
+        help="Base barcode number (generated codes begin at start + 1)",
+    )
     parser.add_argument("--num", type=int, default=1, help="How many stamped files to produce")
     args = parser.parse_args(argv)
 
     if args.num < 1:
-        parser.error("--num must be greater than 0")
+        parser.error("--num must be at least 1")
     return args
 
 
