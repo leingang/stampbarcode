@@ -2,18 +2,20 @@
 
 from __future__ import annotations
 
-import argparse
 import io
 from pathlib import Path
-from typing import Sequence
+
+import typer
 
 BARCODE_BAR_WIDTH = 0.6
 BARCODE_BAR_HEIGHT = 18
 BARCODE_MARGIN = 18
 
+app = typer.Typer(add_completion=False)
+
 
 def generate_codes(start: int, num: int) -> range:
-    return range(start + 1, start + num + 1)
+    return range(start, start + num)
 
 
 def output_path_for(input_path: Path, code: int) -> Path:
@@ -68,37 +70,23 @@ def stamp_pdf(input_pdf: Path, output_pdf: Path, code: int) -> None:
         writer.write(output_stream)
 
 
-def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(prog="stampbarcode")
-    parser.add_argument("pdf_file", type=Path, help="Source PDF file")
-    parser.add_argument(
-        "--start",
-        type=int,
-        default=0,
-        help="Base barcode number (generated codes begin at start + 1)",
-    )
-    parser.add_argument("--num", type=int, default=1, help="How many stamped files to produce")
-    args = parser.parse_args(argv)
+def run(pdf_file: Path, start: int, num: int) -> None:
+    if not pdf_file.exists():
+        raise FileNotFoundError(f"Input file does not exist: {pdf_file}")
 
-    if args.num < 1:
-        parser.error("--num must be at least 1")
-    return args
+    for code in generate_codes(start, num):
+        output_pdf = output_path_for(pdf_file, code)
+        stamp_pdf(pdf_file, output_pdf, code)
 
 
-def run(args: argparse.Namespace) -> None:
-    if not args.pdf_file.exists():
-        raise FileNotFoundError(f"Input file does not exist: {args.pdf_file}")
-
-    for code in generate_codes(args.start, args.num):
-        output_pdf = output_path_for(args.pdf_file, code)
-        stamp_pdf(args.pdf_file, output_pdf, code)
-
-
-def main(argv: Sequence[str] | None = None) -> int:
-    args = parse_args(argv)
-    run(args)
-    return 0
+@app.command()
+def main(
+    pdf_file: Path = typer.Argument(..., help="Source PDF file"),
+    start: int = typer.Option(0, "--start", help="Starting barcode number"),
+    num: int = typer.Option(1, "--num", min=1, help="How many stamped files to produce"),
+) -> None:
+    run(pdf_file, start, num)
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    app()
