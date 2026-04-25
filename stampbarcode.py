@@ -22,13 +22,6 @@ def output_path_for(input_path: Path, code: int) -> Path:
     return input_path.with_name(f"{input_path.stem}-{code}.pdf")
 
 
-def barcode_x_position(page_width: float, barcode_width: float, margin: float, page_number: int) -> float:
-    is_recto = page_number % 2 == 1
-    if is_recto:
-        return margin
-    return page_width - barcode_width - margin
-
-
 def create_overlay(page_width: float, page_height: float, code: int, page_number: int) -> io.BytesIO:
     from reportlab.graphics.barcode import code39
     from reportlab.pdfgen import canvas
@@ -43,9 +36,26 @@ def create_overlay(page_width: float, page_height: float, code: int, page_number
         humanReadable=True,
     )
 
-    x = barcode_x_position(page_width, barcode.width, BARCODE_MARGIN, page_number)
-    y = max((page_height - barcode.height) / 2.0, BARCODE_MARGIN)
-    barcode.drawOn(pdf_canvas, x, y)
+    is_recto = page_number % 2 == 1
+    pdf_canvas.saveState()
+    if is_recto:
+        # Counterclockwise (+90°): barcode runs vertically on the left (recto) edge.
+        # After translate(tx,ty) + rotate(90), local (x,y) maps to page (tx-y, ty+x).
+        # Barcode occupies page_x in [tx-H, tx], page_y in [ty, ty+W].
+        tx = BARCODE_MARGIN + barcode.height
+        ty = (page_height - barcode.width) / 2
+        pdf_canvas.translate(tx, ty)
+        pdf_canvas.rotate(90)
+    else:
+        # Clockwise (-90°): barcode runs vertically on the right (verso) edge.
+        # After translate(tx,ty) + rotate(-90), local (x,y) maps to page (tx+y, ty-x).
+        # Barcode occupies page_x in [tx, tx+H], page_y in [ty-W, ty].
+        tx = page_width - BARCODE_MARGIN - barcode.height
+        ty = (page_height + barcode.width) / 2
+        pdf_canvas.translate(tx, ty)
+        pdf_canvas.rotate(-90)
+    barcode.drawOn(pdf_canvas, 0, 0)
+    pdf_canvas.restoreState()
 
     pdf_canvas.save()
     packet.seek(0)
