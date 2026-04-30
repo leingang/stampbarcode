@@ -22,6 +22,13 @@ def output_path_for(input_path: Path, code: int) -> Path:
     return input_path.with_name(f"{input_path.stem}-{code}.pdf")
 
 
+def barcode_x_position(page_width: float, barcode_width: float, margin: float, page_number: int) -> float:
+    is_recto = page_number % 2 == 1
+    if is_recto:
+        return margin
+    return page_width - margin - barcode_width
+
+
 def create_overlay(page_width: float, page_height: float, code: int, page_number: int) -> io.BytesIO:
     from reportlab.graphics.barcode import code39
     from reportlab.pdfgen import canvas
@@ -93,7 +100,7 @@ def run(pdf_file: Path, start: int, num: int) -> None:
 def main(
     pdf_file: Path = typer.Argument(..., help="Source PDF file"),
     start: int = typer.Option(0, "--start", help="Starting barcode number"),
-    num: int = typer.Option(1, "--num", min=1, help="How many stamped files to produce"),
+    num: int = typer.Option(1, "-n", "--number", min=1, help="How many stamped files to produce"),
 ) -> None:
     run(pdf_file, start, num)
 

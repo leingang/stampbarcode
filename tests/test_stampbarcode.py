@@ -26,7 +26,7 @@ class StampBarcodeTests(unittest.TestCase):
         self.assertEqual(stampbarcode.barcode_x_position(page_width, barcode_width, margin, 2), 380)
 
     def test_cli_rejects_non_positive_num(self) -> None:
-        result = self.runner.invoke(stampbarcode.app, ["--num", "0", "input.pdf"])
+        result = self.runner.invoke(stampbarcode.app, ["--number", "0", "input.pdf"])
         self.assertNotEqual(result.exit_code, 0)
         self.assertIn("Invalid value for", result.output)
 
