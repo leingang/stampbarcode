@@ -72,10 +72,20 @@ class StampBarcodeTests(unittest.TestCase):
         self.assertNotEqual(result.exit_code, 0)
         self.assertIn("Input file does not exist", str(result.exception))
 
+    def test_cli_accepts_barwidth_option(self) -> None:
+        result = self.runner.invoke(stampbarcode.app, ["--barwidth", "1.2", "missing.pdf"])
+        self.assertNotEqual(result.exit_code, 0)
+        self.assertIn("Input file does not exist", str(result.exception))
+
     def test_cli_rejects_non_positive_num(self) -> None:
         result = self.runner.invoke(stampbarcode.app, ["--number", "0", "input.pdf"])
         self.assertNotEqual(result.exit_code, 0)
         self.assertIn("Invalid value for", result.output)
+
+    def test_cli_rejects_too_small_barwidth(self) -> None:
+        result = self.runner.invoke(stampbarcode.app, ["--barwidth", "0", "input.pdf"])
+        self.assertNotEqual(result.exit_code, 0)
+        self.assertIn("Invalid value for '--barwidth'", result.output)
 
     def test_cli_rejects_invalid_position(self) -> None:
         result = self.runner.invoke(stampbarcode.app, ["--position", "middle", "input.pdf"])
@@ -109,6 +119,18 @@ class StampBarcodeTests(unittest.TestCase):
             self.assertIn("1 0 0 1 207.82 664 cm", content)
             self.assertNotIn("0 1 -1 0", content)
             self.assertNotIn("0 -1 1 0", content)
+
+    def test_stamp_pdf_custom_barwidth_changes_overlay_position(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir) / "source.pdf"
+            output = Path(temp_dir) / "top-custom-width.pdf"
+            self.create_pdf(source)
+
+            stampbarcode.stamp_pdf(source, output, 123, stampbarcode.BarcodePosition.TOP, bar_width=1.2)
+
+            content = self.read_page_content(output, 1)
+
+            self.assertNotIn("1 0 0 1 207.82 664 cm", content)
 
     def test_run_raises_when_input_missing(self) -> None:
         with self.assertRaises(FileNotFoundError):

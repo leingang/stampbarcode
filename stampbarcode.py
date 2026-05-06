@@ -91,6 +91,7 @@ def create_overlay(
     code: int,
     page_number: int,
     position: BarcodePosition = BarcodePosition.INSIDE,
+    bar_width: float = BARCODE_BAR_WIDTH,
 ) -> io.BytesIO:
     from reportlab.graphics.barcode import code39
     from reportlab.pdfgen import canvas
@@ -99,7 +100,7 @@ def create_overlay(
     pdf_canvas = canvas.Canvas(packet, pagesize=(page_width, page_height))
     barcode = code39.Standard39(
         str(code),
-        barWidth=BARCODE_BAR_WIDTH,
+        barWidth=bar_width,
         barHeight=BARCODE_BAR_HEIGHT,
         stop=1,
         humanReadable=True,
@@ -144,6 +145,7 @@ def stamp_pdf(
     output_pdf: Path,
     code: int,
     position: BarcodePosition = BarcodePosition.INSIDE,
+    bar_width: float = BARCODE_BAR_WIDTH,
 ) -> None:
     from pypdf import PdfReader, PdfWriter
 
@@ -153,7 +155,7 @@ def stamp_pdf(
     for page_number, page in enumerate(reader.pages, start=1):
         width = float(page.mediabox.width)
         height = float(page.mediabox.height)
-        overlay_stream = create_overlay(width, height, code, page_number, position)
+        overlay_stream = create_overlay(width, height, code, page_number, position, bar_width)
         overlay_page = PdfReader(overlay_stream).pages[0]
         page.merge_page(overlay_page)
         writer.add_page(page)
@@ -167,13 +169,14 @@ def run(
     start: int,
     num: int,
     position: BarcodePosition = BarcodePosition.INSIDE,
+    bar_width: float = BARCODE_BAR_WIDTH,
 ) -> None:
     if not pdf_file.exists():
         raise FileNotFoundError(f"Input file does not exist: {pdf_file}")
 
     for code in generate_codes(start, num):
         output_pdf = output_path_for(pdf_file, code)
-        stamp_pdf(pdf_file, output_pdf, code, position)
+        stamp_pdf(pdf_file, output_pdf, code, position, bar_width)
 
 
 @app.command()
@@ -181,6 +184,12 @@ def main(
     pdf_file: Path = typer.Argument(..., help="Source PDF file"),
     start: int = typer.Option(0, "--start", help="Starting barcode number"),
     num: int = typer.Option(1, "-n", "--number", min=1, help="How many stamped files to produce"),
+    barwidth: float = typer.Option(
+        BARCODE_BAR_WIDTH,
+        "--barwidth",
+        min=0.01,
+        help="Barcode bar width",
+    ),
     position: BarcodePosition = typer.Option(
         BarcodePosition.INSIDE,
         "--position",
@@ -188,7 +197,7 @@ def main(
         help="Barcode placement: inside, outside, left, right, top, or bottom",
     ),
 ) -> None:
-    run(pdf_file, start, num, position)
+    run(pdf_file, start, num, position, barwidth)
 
 
 if __name__ == "__main__":
