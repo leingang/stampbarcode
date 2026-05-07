@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import re
 from enum import Enum
 from pathlib import Path
 
@@ -22,6 +23,42 @@ class BarcodePosition(str, Enum):
     RIGHT = "right"
     TOP = "top"
     BOTTOM = "bottom"
+
+
+def parse_offset(offset_str: str | None) -> tuple[float, float]:
+    """Parse offset string in format [+-][number][+-][number].
+    
+    Returns (lateral_offset, normal_offset).
+    
+    Offsets are relative to barcode orientation:
+    - lateral: positive = right (in barcode coords), negative = left
+    - normal: positive = up (in barcode coords), negative = down
+    
+    For top/bottom positions (unrotated), barcode and page axes align:
+      - lateral offset → horizontal page displacement
+      - normal offset → vertical page displacement
+    
+    For left/right positions (90° rotated):
+      - Rotation +90° (left edge): lateral → vertical page displacement,
+        normal → horizontal page displacement (with sign reversal)
+      - Rotation -90° (right edge): lateral → vertical page displacement
+        (reversed), normal → horizontal page displacement
+    """
+    if not offset_str:
+        return (0.0, 0.0)
+    
+    # Parse format: [+-][number][+-][number]
+    # Find the second sign to split lateral and normal offsets
+    match = re.match(r'([+-]?\d+(?:\.\d+)?)\s*([+-]\d+(?:\.\d+)?)', offset_str.strip())
+    if not match:
+        raise ValueError(
+            f"Invalid offset format: '{offset_str}'. Expected format: [+-]number[+-]number "
+            "(e.g., '+10-5' or '-3.5+2.1')"
+        )
+    
+    lateral = float(match.group(1))
+    normal = float(match.group(2))
+    return (lateral, normal)
 
 
 def generate_codes(start: int, num: int) -> range:
@@ -92,7 +129,17 @@ def create_overlay(
     page_number: int,
     position: BarcodePosition = BarcodePosition.INSIDE,
     bar_width: float = BARCODE_BAR_WIDTH,
+    lateral_offset: float = 0.0,
+    normal_offset: float = 0.0,
 ) -> io.BytesIO:
+    """Create PDF overlay with barcode.
+    
+    Args:
+        lateral_offset: Offset perpendicular to barcode's primary axis.
+                       Positive = right in barcode coords.
+        normal_offset: Offset along barcode's primary axis.
+                      Positive = up in barcode coords.
+    """
     from reportlab.graphics.barcode import code39
     from reportlab.pdfgen import canvas
 
@@ -112,25 +159,31 @@ def create_overlay(
         # Counterclockwise (+90°): barcode runs vertically on the left (recto) edge.
         # After translate(tx,ty) + rotate(90), local (x,y) maps to page (tx-y, ty+x).
         # Barcode occupies page_x in [tx-H, tx], page_y in [ty, ty+W].
-        tx = BARCODE_MARGIN + barcode.height
-        ty = (page_height - barcode.width) / 2
+        # Offsets in barcode coords: lateral offset → dy, normal offset → -dx
+        tx = BARCODE_MARGIN + barcode.height - normal_offset
+        ty = (page_height - barcode.width) / 2 + lateral_offset
         pdf_canvas.translate(tx, ty)
         pdf_canvas.rotate(90)
     elif edge == "right":
         # Clockwise (-90°): barcode runs vertically on the right (verso) edge.
         # After translate(tx,ty) + rotate(-90), local (x,y) maps to page (tx+y, ty-x).
         # Barcode occupies page_x in [tx, tx+H], page_y in [ty-W, ty].
-        tx = page_width - BARCODE_MARGIN - barcode.height
-        ty = (page_height + barcode.width) / 2
+        # Offsets in barcode coords: lateral offset → -dy, normal offset → dx
+        tx = page_width - BARCODE_MARGIN - barcode.height + normal_offset
+        ty = (page_height + barcode.width) / 2 - lateral_offset
         pdf_canvas.translate(tx, ty)
         pdf_canvas.rotate(-90)
     elif edge == "top":
-        tx = (page_width - barcode.width) / 2
-        ty = page_height - BARCODE_MARGIN - barcode.height
+        # No rotation: barcode horizontal at top
+        # Offsets in barcode coords: lateral offset → dx, normal offset → dy
+        tx = (page_width - barcode.width) / 2 + lateral_offset
+        ty = page_height - BARCODE_MARGIN - barcode.height + normal_offset
         pdf_canvas.translate(tx, ty)
     else:
-        tx = (page_width - barcode.width) / 2
-        ty = BARCODE_MARGIN
+        # Bottom: no rotation
+        # Offsets in barcode coords: lateral offset → dx, normal offset → dy
+        tx = (page_width - barcode.width) / 2 + lateral_offset
+        ty = BARCODE_MARGIN + normal_offset
         pdf_canvas.translate(tx, ty)
     barcode.drawOn(pdf_canvas, 0, 0)
     pdf_canvas.restoreState()
@@ -146,6 +199,8 @@ def stamp_pdf(
     code: int,
     position: BarcodePosition = BarcodePosition.INSIDE,
     bar_width: float = BARCODE_BAR_WIDTH,
+    lateral_offset: float = 0.0,
+    normal_offset: float = 0.0,
 ) -> None:
     from pypdf import PdfReader, PdfWriter
 
@@ -155,7 +210,10 @@ def stamp_pdf(
     for page_number, page in enumerate(reader.pages, start=1):
         width = float(page.mediabox.width)
         height = float(page.mediabox.height)
-        overlay_stream = create_overlay(width, height, code, page_number, position, bar_width)
+        overlay_stream = create_overlay(
+            width, height, code, page_number, position, bar_width,
+            lateral_offset, normal_offset
+        )
         overlay_page = PdfReader(overlay_stream).pages[0]
         page.merge_page(overlay_page)
         writer.add_page(page)
@@ -170,13 +228,16 @@ def run(
     num: int,
     position: BarcodePosition = BarcodePosition.INSIDE,
     bar_width: float = BARCODE_BAR_WIDTH,
+    lateral_offset: float = 0.0,
+    normal_offset: float = 0.0,
 ) -> None:
     if not pdf_file.exists():
         raise FileNotFoundError(f"Input file does not exist: {pdf_file}")
 
     for code in generate_codes(start, num):
         output_pdf = output_path_for(pdf_file, code)
-        stamp_pdf(pdf_file, output_pdf, code, position, bar_width)
+        stamp_pdf(pdf_file, output_pdf, code, position, bar_width,
+                  lateral_offset, normal_offset)
 
 
 @app.command()
@@ -196,8 +257,17 @@ def main(
         case_sensitive=False,
         help="Barcode placement: inside, outside, left, right, top, or bottom",
     ),
+    offset: str = typer.Option(
+        None,
+        "--offset",
+        help="Barcode offset as [+-]lateral[+-]normal (e.g., '+10-5' or '-3.5+2.1'). "
+             "Lateral moves perpendicular to barcode axis (positive=right). "
+             "Normal moves along barcode axis (positive=up). "
+             "Offsets are relative to barcode orientation.",
+    ),
 ) -> None:
-    run(pdf_file, start, num, position, barwidth)
+    lateral_offset, normal_offset = parse_offset(offset)
+    run(pdf_file, start, num, position, barwidth, lateral_offset, normal_offset)
 
 
 if __name__ == "__main__":
